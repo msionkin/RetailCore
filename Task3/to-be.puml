@@ -1,0 +1,77 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title TO-BE Диаграмма контекста платформы RetailCore (целевая архитектура первого этапа трансформации)
+
+AddElementTag("new", $bgColor="#2E7D32", $fontColor="#FFFFFF", $legendText="Новый компонент первого этапа")
+AddElementTag("changed", $bgColor="#EF6C00", $fontColor="#FFFFFF", $legendText="Существующий компонент, изменяется на первом этапе")
+AddElementTag("unchanged", $bgColor="#546E7A", $fontColor="#FFFFFF", $legendText="Не входит в первый этап, сохраняется как есть")
+
+Person(customer, "Клиент", "Оформляет заказы, просматривает статусы")
+Person(support, "Служба поддержки", "Разбирает исключения, обрабатывает обращения")
+Person(business_user, "Бизнес-пользователи", "Получают аналитику, управленческую и финансовую отчётность")
+
+System_Ext(marketplaces, "Маркетплейсы", "Внешние каналы продаж")
+System_Ext(payment_providers, "Платёжные провайдеры", "Обеспечивают создание платёжных сессий")
+System_Ext(delivery_partners, "Службы доставки", "Логистические партнёры для осуществления доставки")
+System_Ext(partner_export_systems, "Партнёрские экспортные контуры", "Внешние партнёрские системы, получающие данные о заказах через .NET-сервис")
+
+System_Boundary(retailcore_boundary, "Платформа RetailCore") {
+
+    Container(monolith, "Java-монолит (Order Core)", "Java", "Оформление заказа, checkout, оркестрация оплаты. Ядро создания заказа и платежей не входит в первый этап и сохраняется без изменений.", $tags="unchanged")
+
+    Container(oracle, "Oracle Database", "Oracle", "Операционное хранилище заказов, статусов и резервов. Роль интеграционной шины для логистики (staging-таблицы) выводится из использования. (Приоритет 2)", $tags="changed")
+
+    Container(status_read_model, "Order Status Read Model", "Новый сервис", "Агрегирует события из монолита, Oracle и интеграций. Отдаёт клиентский статус и детализированное внутреннее состояние с причиной отклонения. (Приоритет 1)", $tags="new")
+
+    Container(delivery_contract, "Delivery Integration Contract", "API / события", "Явный контракт обмена логистическими данными между монолитом, .NET-сервисом и партнёрами взамен общих staging-таблиц Oracle. (Приоритет 2)", $tags="new")
+
+    Container(async_delivery, "Async Delivery Reservation", "Компонент оформления заказа", "Немедленное подтверждение заказа с предварительным слотом на основе закэшированных квот; фактическое подтверждение у партнёра — асинхронно. (Приоритет 3)", $tags="new")
+
+    Container(exception_handling, "Exception Handling", "Новый сервис", "Формализованная маршрутизация отклонений (зависшие статусы, WAITING_MANUAL_REVIEW, неответ логистики) вместо ручных корректировок в БД и admin tools. (Приоритет 4)", $tags="new")
+
+    Container(pricing_facade, "Pricing & Promo Facade", "Новый сервис (strangler)", "Инкапсулирует расчёт цены и промо; постепенно перенимает логику у кода монолита, PromoService и legacy_promo_pkg в Oracle. (Приоритет 5)", $tags="new")
+
+    Container(dotnet_service, ".NET-сервис партнёрских интеграций", ".NET", "Обмен данными с частью внешних партнёров. Переходит с чтения staging-таблиц на потребление Delivery Integration Contract. (Приоритет 2)", $tags="changed")
+
+    Container(support_tools, "Инструменты поддержки", "Admin UI", "Читает единую историю заказа из Read Model; получает от Exception Handling готовые сценарии действий вместо прямых правок в БД. (Приоритеты 1 и 4)", $tags="changed")
+
+    Container(analytics, "Аналитика и BI", "Python / SQL", "Формирование витрин и отчётности. На первом этапе не меняется и продолжает читать операционную Oracle напрямую.", $tags="unchanged")
+}
+
+' --- Внешние взаимодействия ---
+Rel(customer, monolith, "Оформляет заказ", "Web/Mobile")
+Rel(customer, status_read_model, "Просматривает статус заказа", "Web/Mobile")
+Rel(marketplaces, monolith, "Передают заказы", "API")
+Rel(monolith, payment_providers, "Инициирует оплату", "Синхронный вызов")
+Rel(async_delivery, delivery_partners, "Резервирует слот доставки (асинхронно, после мгновенного подтверждения заказа клиенту)", "API")
+Rel(dotnet_service, partner_export_systems, "Передаёт экспортные данные о заказе", "API")
+
+' --- Внутренние взаимодействия ---
+Rel(monolith, oracle, "Хранит заказ, резервы и служебные данные", "SQL")
+Rel(monolith, async_delivery, "Делегирует резервирование доставки")
+Rel(monolith, pricing_facade, "Запрашивает расчёт цены и промо при оформлении")
+Rel(pricing_facade, oracle, "Использует legacy-правила на переходный период", "SQL")
+
+Rel(async_delivery, delivery_contract, "Публикует запрос и получает подтверждение слота")
+Rel(delivery_contract, dotnet_service, "Передаёт и принимает данные о доставке", "API / события")
+
+Rel(monolith, status_read_model, "Публикует события статуса заказа")
+Rel(delivery_contract, status_read_model, "Публикует статус подтверждения доставки")
+Rel(pricing_facade, status_read_model, "Публикует события расчёта цены/промо")
+
+Rel(exception_handling, status_read_model, "Читает состояние заказа для определения отклонений")
+Rel(exception_handling, delivery_contract, "Перехватывает события об отклонениях в доставке")
+
+Rel(support, support_tools, "Разбирает исключения и обращения клиентов")
+Rel(support_tools, status_read_model, "Читает единую историю и причины отклонений")
+Rel(support_tools, exception_handling, "Получает рекомендованные сценарии действий")
+
+Rel(oracle, analytics, "Прямые SQL-выгрузки и batch-задания", "SQL")
+Rel(business_user, analytics, "Получают отчётность", "BI / выгрузки")
+
+SHOW_LEGEND()
+
+@enduml

@@ -1,0 +1,28 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_WITH_LEGEND()
+
+title AS-IS Диаграмма контекста системы RetailCore
+
+Person(customer, "Клиент", "Оформляет заказы, просматривает статусы")
+Person(support, "Служба поддержки", "Разбирает исключения, корректирует статусы")
+Person(business_user, "Бизнес-пользователи", "Получают аналитику, управленческую и финансовую отчетность")
+
+System_Boundary(retailcore_boundary, "Платформа RetailCore") {
+    System(retailcore, "RetailCore", "Центральная система оформления и обработки заказов. Содержит монолитное ядро, базу данных Oracle и вспомогательные сервисы.")
+}
+
+System_Ext(marketplaces, "Маркетплейсы", "Внешние каналы продаж")
+System_Ext(payment_providers, "Платёжные провайдеры", "Обеспечивают создание платежных сессий")
+System_Ext(delivery_partners, "Службы доставки", "Логистические партнеры для осуществления доставки")
+
+Rel(customer, retailcore, "Оформляет заказы, отслеживает статусы", "Web/Mobile")
+Rel(support, retailcore, "Разбирает исключения", "Админ-инструменты")
+Rel(business_user, retailcore, "Получают аналитику", "BI / выгрузки")
+
+Rel(marketplaces, retailcore, "Передают заказы", "API")
+Rel(retailcore, payment_providers, "Инициирует оплату", "Синхронный вызов")
+Rel(retailcore, delivery_partners, "Резервирует доставку", "Синхронный/Асинхронный вызов")
+
+@enduml
